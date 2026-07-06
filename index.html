@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% if not authenticated %}
+  <div class="card card-hero">
+    <h1>Gmail Bulk Cleaner</h1>
+    <p class="hero-sub">
+      Delete thousands of emails from Promotions, Updates, Social, and more
+      &mdash; bypassing Gmail&rsquo;s 100-email UI limit.
+    </p>
+    <a href="{{ url_for('login') }}" class="btn btn-google">
+      <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.54 28.59A14.5 14.5 0 019.5 24c0-1.59.28-3.14.76-4.59l-7.98-6.19A23.99 23.99 0 000 24c0 3.77.87 7.35 2.56 10.56l7.98-5.97z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 5.97C6.51 42.62 14.62 48 24 48z"/></svg>
+      Sign in with Google
+    </a>
+    <p class="hero-note">Requires a Gmail API-enabled Google Cloud project.</p>
+  </div>
+{% else %}
+  <div class="card">
+    <h1>Delete Gmail Emails</h1>
+    <p class="subtitle">Search and bulk-delete emails matching your criteria.</p>
+
+    {% if error %}
+      <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    <form method="POST" action="{{ url_for('search') }}" class="form">
+      <div class="form-row">
+        <div class="form-group form-group-keyword">
+          <label for="keyword">Search keyword or expression</label>
+          <input type="text" id="keyword" name="keyword" class="form-control"
+                 placeholder="e.g. unsubscribe, from:spam@example.com" required>
+        </div>
+        <div class="form-group form-group-category">
+          <label for="category">Gmail Category</label>
+          <select id="category" name="category" class="form-control">
+            <option value="all">All Categories</option>
+            <option value="promotions">Promotions</option>
+            <option value="updates">Updates</option>
+            <option value="social">Social</option>
+            <option value="forums">Forums</option>
+            <option value="primary">Primary</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="before">Before date (optional)</label>
+          <input type="date" id="before" name="before" class="form-control">
+        </div>
+        <div class="form-group">
+          <label for="after">After date (optional)</label>
+          <input type="date" id="after" name="after" class="form-control">
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary">Search &amp; Preview</button>
+    </form>
+  </div>
+
+  <div class="card card-tips">
+    <h3>Search examples</h3>
+    <ul>
+      <li><code>unsubscribe</code> &mdash; emails with "unsubscribe" in the body</li>
+      <li><code>from:noreply@company.com</code> &mdash; all emails from a sender</li>
+      <li><code>subject:"weekly newsletter"</code> &mdash; exact subject match</li>
+      <li><code>older_than:6m</code> &mdash; emails older than 6 months</li>
+    </ul>
+  </div>
+{% endif %}
+
+{% endblock %}
