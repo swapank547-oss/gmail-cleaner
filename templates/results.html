@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <h1>Search Results</h1>
+  <p class="subtitle">
+    Found <strong>{{ total }}</strong> email(s) matching your criteria.
+    {% if total > 0 %}
+      Review the count below before proceeding.
+    {% endif %}
+  </p>
+
+  <div class="search-summary">
+    <table class="summary-table">
+      <tr><td>Keyword</td><td><code>{{ keyword }}</code></td></tr>
+      <tr><td>Category</td><td><code>{{ category }}</code></td></tr>
+      {% if before %}<tr><td>Before</td><td>{{ before }}</td></tr>{% endif %}
+      {% if after %}<tr><td>After</td><td>{{ after }}</td></tr>{% endif %}
+    </table>
+  </div>
+
+  {% if total == 0 %}
+    <p class="no-results">No emails matched your search. Try a different keyword or category.</p>
+    <a href="{{ url_for('index') }}" class="btn btn-outline">Back</a>
+  {% else %}
+    <div class="actions">
+      <button class="btn btn-danger" id="btnDelete" data-total="{{ total }}">
+        Delete {{ total }} email(s) permanently
+      </button>
+      <a href="{{ url_for('index') }}" class="btn btn-outline">Change search</a>
+    </div>
+  {% endif %}
+</div>
+
+<div id="progressContainer" class="card" style="display:none">
+  <h2>Deleting...</h2>
+  <div class="progress-bar">
+    <div id="progressFill" class="progress-fill"></div>
+  </div>
+  <p id="progressText">Starting...</p>
+</div>
+
+<div id="doneContainer" class="card card-done" style="display:none">
+  <h2>Done</h2>
+  <p id="doneText"></p>
+  <a href="{{ url_for('index') }}" class="btn btn-primary">Delete more</a>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const MESSAGE_IDS = {{ message_ids | safe }};
+
+document.getElementById('btnDelete')?.addEventListener('click', async function () {
+  const btn = this;
+  btn.disabled = true;
+  btn.textContent = 'Deleting...';
+
+  document.getElementById('progressContainer').style.display = 'block';
+
+  const resp = await fetch('{{ url_for('delete') }}', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message_ids: MESSAGE_IDS }),
+  });
+  const { task_id } = await resp.json();
+
+  // Poll progress
+  const fill = document.getElementById('progressFill');
+  const text = document.getElementById('progressText');
+  const total = {{ total }};
+
+  const poll = setInterval(async () => {
+    const pr = await fetch(`/progress/${task_id}`);
+    const state = await pr.json();
+
+    if (state.status === 'running') {
+      const pct = Math.round((state.deleted / total) * 100);
+      fill.style.width = pct + '%';
+      text.textContent = `Deleted ${state.deleted} of ${total} emails (${pct}%)`;
+    } else if (state.status === 'done') {
+      clearInterval(poll);
+      fill.style.width = '100%';
+      text.textContent = `Deleted ${state.deleted} of ${total} emails`;
+      document.getElementById('progressContainer').style.display = 'none';
+      document.getElementById('doneContainer').style.display = 'block';
+      document.getElementById('doneText').textContent =
+        `Successfully deleted ${state.deleted} email(s).`;
+    } else if (state.status === 'error') {
+      clearInterval(poll);
+      text.textContent = `Error: ${state.error}`;
+    }
+  }, 500);
+});
+</script>
+{% endblock %}
