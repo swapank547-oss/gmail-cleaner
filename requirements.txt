@@ -1,8 +1,0 @@
-flask>=3.0
-flask-session>=0.8
-cachelib>=0.13
-google-api-python-client>=2.100
-google-auth-oauthlib>=1.2
-google-auth-httplib2>=0.2
-python-dotenv>=1.0
-gunicorn>=22.0
