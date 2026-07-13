@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <h1>Category Overview</h1>
+  <p class="subtitle">
+    Scan your inbox to see email counts per category and bulk-delete by category.
+  </p>
+
+  <div class="actions" id="scanActions">
+    <button class="btn btn-primary" id="btnScan">Scan Categories</button>
+  </div>
+</div>
+
+<div id="scanProgress" class="card" style="display:none">
+  <h2>Scanning...</h2>
+  <p id="scanStatus">Starting scan...</p>
+  <div class="progress-bar">
+    <div id="scanProgressFill" class="progress-fill"></div>
+  </div>
+</div>
+
+<div id="scanError" class="card" style="display:none">
+  <div class="alert alert-error" id="scanErrorText"></div>
+</div>
+
+<div id="resultsContainer" style="display:none">
+  <div class="card">
+    <div class="overall-stats">
+      <span class="overall-count" id="overallCount">0</span>
+      <span class="overall-label">total emails found</span>
+    </div>
+  </div>
+
+  <div class="category-grid" id="categoryGrid"></div>
+
+  <div class="card">
+    <div id="deleteProgress" style="display:none">
+      <h2>Deleting...</h2>
+      <div class="progress-bar">
+        <div id="deleteProgressFill" class="progress-fill"></div>
+      </div>
+      <p id="deleteProgressText">Starting...</p>
+    </div>
+    <div id="deleteDone" style="display:none">
+      <h2>Done</h2>
+      <p id="deleteDoneText"></p>
+      <button class="btn btn-primary" onclick="location.reload()">Refresh Overview</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CATEGORY_LABELS = {
+  primary: "Primary",
+  promotions: "Promotions",
+  updates: "Updates",
+  social: "Social",
+  forums: "Forums",
+};
+
+document.getElementById('btnScan')?.addEventListener('click', async function () {
+  const btn = this;
+  btn.disabled = true;
+  btn.textContent = 'Scanning...';
+
+  document.getElementById('scanProgress').style.display = 'block';
+  document.getElementById('scanStatus').textContent = 'Scanning categories...';
+  document.getElementById('scanError').style.display = 'none';
+
+  function fail(msg) {
+    document.getElementById('scanProgress').style.display = 'none';
+    document.getElementById('scanError').style.display = 'block';
+    document.getElementById('scanErrorText').textContent = 'Error: ' + msg;
+    btn.disabled = false;
+    btn.textContent = 'Scan Categories';
+  }
+
+  try {
+    const resp = await fetch('{{ url_for('category_stats') }}', { method: 'POST' });
+    if (!resp.ok) {
+      fail(`Server error (${resp.status})`); return;
+    }
+    const data = await resp.json();
+    document.getElementById('scanProgress').style.display = 'none';
+    renderResults(data.categories, data.overall_total);
+  } catch (e) {
+    fail(e.message);
+  }
+});
+
+function renderResults(categories, overallTotal) {
+  document.getElementById('resultsContainer').style.display = 'block';
+  document.getElementById('overallCount').textContent = overallTotal.toLocaleString();
+
+  const grid = document.getElementById('categoryGrid');
+  grid.innerHTML = '';
+
+  const entries = Object.entries(categories).sort((a, b) => b[1].total - a[1].total);
+  const maxTotal = entries.length > 0 ? entries[0][1].total : 0;
+
+  for (const [key, data] of entries) {
+    const label = CATEGORY_LABELS[key] || key;
+    const pct = maxTotal > 0 ? Math.round((data.total / maxTotal) * 100) : 0;
+
+    let barColor = '#22c55e';
+    let tag = '';
+    if (data.total === maxTotal && data.total > 0) {
+      barColor = '#dc2626';
+      tag = '<span class="badge badge-red">Most emails</span>';
+    } else if (pct >= 60) {
+      barColor = '#f59e0b';
+    }
+
+    const senderList = data.sample_senders && data.sample_senders.length > 0
+      ? data.sample_senders.map(s => `<li>${s}</li>`).join('')
+      : '<li class="no-senders">No sender data</li>';
+
+    const card = document.createElement('div');
+    card.className = 'category-card';
+    card.innerHTML = `
+      <div class="category-card-header">
+        <div>
+          <h3>${label}</h3>
+          ${tag}
+        </div>
+        <span class="category-count">${data.total.toLocaleString()} emails</span>
+      </div>
+      <div class="category-bar">
+        <div class="category-bar-fill" style="width:${pct}%;background:${barColor}"></div>
+      </div>
+      <div class="category-details">
+        ${senderList.length > 0 ? `<ul class="sender-list">${senderList}</ul>` : ''}
+      </div>
+      <div class="category-actions">
+        <button class="btn btn-danger btn-sm btn-delete-cat" data-category="${key}" data-count="${data.total}" data-label="${label}">
+          Delete ${data.total} emails
+        </button>
+      </div>
+    `;
+    grid.appendChild(card);
+  }
+
+  document.querySelectorAll('.btn-delete-cat').forEach(btn => {
+    btn.addEventListener('click', function () {
+      const category = this.dataset.category;
+      const count = parseInt(this.dataset.count);
+      const label = this.dataset.label;
+      deleteCategory(category, count, label);
+    });
+  });
+}
+
+async function deleteCategory(category, total, label) {
+  document.getElementById('deleteProgress').style.display = 'block';
+  document.getElementById('deleteDone').style.display = 'none';
+  document.getElementById('deleteProgressText').textContent = `Collecting IDs for ${label}...`;
+  document.getElementById('deleteProgressFill').style.width = '0%';
+
+  const resp = await fetch('{{ url_for('delete_category') }}', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ category }),
+  });
+  const { task_id } = await resp.json();
+
+  const poll = setInterval(async () => {
+    try {
+      const pr = await fetch(`/progress/${task_id}`);
+      if (!pr.ok) {
+        clearInterval(poll); delFail(`Server error (${pr.status})`); return;
+      }
+      const state = await pr.json();
+
+      if (state.status === 'collecting') {
+        document.getElementById('deleteProgressText').textContent =
+          `Collected ${state.collected} IDs from ${label}...`;
+      } else if (state.status === 'deleting') {
+        const pct = Math.round((state.deleted / state.total) * 100);
+        document.getElementById('deleteProgressFill').style.width = pct + '%';
+        document.getElementById('deleteProgressText').textContent =
+          `Deleted ${state.deleted} of ${state.total} emails (${pct}%)`;
+      } else if (state.status === 'done') {
+        clearInterval(poll);
+        document.getElementById('deleteProgressFill').style.width = '100%';
+        document.getElementById('deleteProgressText').textContent =
+          `Deleted ${state.deleted} of ${state.total} emails`;
+        document.getElementById('deleteProgress').style.display = 'none';
+        document.getElementById('deleteDone').style.display = 'block';
+        document.getElementById('deleteDoneText').textContent =
+          `Successfully deleted ${state.deleted} email(s) from ${label}.`;
+      } else if (state.status === 'error') {
+        clearInterval(poll); delFail(state.error || 'Unknown error');
+      } else {
+        clearInterval(poll); delFail('Task lost or unavailable');
+      }
+    } catch (e) {
+      clearInterval(poll); delFail(e.message);
+    }
+  }, 500);
+  function delFail(msg) {
+    document.getElementById('deleteProgressText').textContent = 'Error: ' + msg;
+  }
+}
+</script>
+{% endblock %}
