@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <h1>Category Overview</h1>
+  <p class="subtitle">
+    Scan your inbox to see email counts per category.
+  </p>
+
+  <div class="actions" id="scanActions">
+    <button class="btn btn-primary" id="btnScan">Scan Categories</button>
+  </div>
+</div>
+
+<div id="scanProgress" class="card" style="display:none">
+  <h2>Scanning...</h2>
+  <p id="scanStatus">Starting scan...</p>
+  <div class="progress-bar">
+    <div id="scanProgressFill" class="progress-fill"></div>
+  </div>
+</div>
+
+<div id="scanError" class="card" style="display:none">
+  <div class="alert alert-error" id="scanErrorText"></div>
+</div>
+
+<div id="resultsContainer" style="display:none">
+  <div class="card">
+    <div class="overall-stats">
+      <span class="overall-count" id="overallCount">0</span>
+      <span class="overall-label">total emails found</span>
+    </div>
+  </div>
+
+  <div class="category-grid" id="categoryGrid"></div>
+
+
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CATEGORY_LABELS = {
+  primary: "Primary",
+  promotions: "Promotions",
+  updates: "Updates",
+  social: "Social",
+  forums: "Forums",
+};
+
+document.getElementById('btnScan')?.addEventListener('click', async function () {
+  const btn = this;
+  btn.disabled = true;
+  btn.textContent = 'Scanning...';
+
+  document.getElementById('scanProgress').style.display = 'block';
+  document.getElementById('scanStatus').textContent = 'Starting scan...';
+  document.getElementById('scanProgressFill').style.width = '0%';
+  document.getElementById('scanError').style.display = 'none';
+
+  const resp = await fetch('{{ url_for('category_stats') }}', { method: 'POST' });
+  const { task_id } = await resp.json();
+
+  const cats = ['primary', 'promotions', 'updates', 'social', 'forums'];
+  const totalCats = cats.length;
+
+  const poll = setInterval(async () => {
+    try {
+      const pr = await fetch(`/progress/${task_id}`);
+      if (!pr.ok) {
+        clearInterval(poll); fail(`Server error (${pr.status})`); return;
+      }
+      const state = await pr.json();
+
+      if (state.status === 'scanning') {
+        const done = Object.keys(state.categories || {}).length;
+        const pct = Math.round((done / totalCats) * 100);
+        document.getElementById('scanProgressFill').style.width = pct + '%';
+        document.getElementById('scanStatus').innerHTML =
+          `Scanned ${done} of ${totalCats} categories... (${state.overall_total || 0} emails)` +
+          (state.current ? `<br><span style="font-size:13px;color:#64748b">${state.current}</span>` : '');
+      } else if (state.status === 'done') {
+        clearInterval(poll);
+        document.getElementById('scanProgress').style.display = 'none';
+        renderResults(state.categories, state.overall_total);
+      } else if (state.status === 'error') {
+        clearInterval(poll); fail(state.error || 'Unknown error');
+      } else {
+        clearInterval(poll); fail('Task lost or unavailable');
+      }
+    } catch (e) {
+      clearInterval(poll); fail(e.message);
+    }
+  }, 600);
+
+  function fail(msg) {
+    document.getElementById('scanProgress').style.display = 'none';
+    document.getElementById('scanError').style.display = 'block';
+    document.getElementById('scanErrorText').textContent = 'Error: ' + msg;
+    btn.disabled = false;
+    btn.textContent = 'Scan Categories';
+  }
+});
+
+function renderResults(categories, overallTotal) {
+  document.getElementById('resultsContainer').style.display = 'block';
+  document.getElementById('overallCount').textContent = overallTotal.toLocaleString();
+
+  const grid = document.getElementById('categoryGrid');
+  grid.innerHTML = '';
+
+  const entries = Object.entries(categories).sort((a, b) => b[1].total - a[1].total);
+  const maxTotal = entries.length > 0 ? entries[0][1].total : 0;
+
+  for (const [key, data] of entries) {
+    const label = CATEGORY_LABELS[key] || key;
+    const pct = maxTotal > 0 ? Math.round((data.total / maxTotal) * 100) : 0;
+
+    let barColor = '#22c55e';
+    let tag = '';
+    if (data.total === maxTotal && data.total > 0) {
+      barColor = '#dc2626';
+      tag = '<span class="badge badge-red">Most emails</span>';
+    } else if (pct >= 60) {
+      barColor = '#f59e0b';
+    }
+
+    const senderEntries = Object.entries(data.senders || {});
+    const senderRows = senderEntries.length > 0
+      ? senderEntries.slice(0, 15).map(([s, c]) =>
+          `<tr><td class="sender-addr">${s}</td><td class="sender-count">${c.toLocaleString()}</td></tr>`
+        ).join('')
+      : '<tr><td colspan="2" class="no-senders">No sender data</td></tr>';
+
+    const more = senderEntries.length > 15
+      ? `<p class="sender-more">...and ${senderEntries.length - 15} more senders</p>` : '';
+
+    const card = document.createElement('div');
+    card.className = 'category-card';
+    card.innerHTML = `
+      <div class="category-card-header">
+        <div>
+          <h3>${label}</h3>
+          ${tag}
+        </div>
+        <span class="category-count">${data.total.toLocaleString()} emails</span>
+      </div>
+      <div class="category-bar">
+        <div class="category-bar-fill" style="width:${pct}%;background:${barColor}"></div>
+      </div>
+      <div class="category-details">
+        <p class="sender-count">${senderEntries.length} senders</p>
+        <table class="sender-table"><tbody>${senderRows}</tbody></table>
+        ${more}
+      </div>
+
+    `;
+    grid.appendChild(card);
+  }
+
+}
+</script>
+{% endblock %}
